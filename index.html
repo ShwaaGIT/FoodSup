@@ -136,6 +136,36 @@
       input, select { font-size: 14px; padding: 8px 10px; min-height: 36px; }
       .tabs .tab-btn { font-size: 14px; padding: 10px 8px; border-radius: 6px; }
     }
+
+    /* Mobile/tablet: fit first 5 Orders columns on-screen */
+    @media (max-width: 899px) {
+      /* Slightly tighter spacing inside time cells */
+      .time-cell { gap: 6px; }
+
+      /* Constrain Orders table columns */
+      #ordersTable { table-layout: fixed; }
+      #ordersTable th, #ordersTable td { padding: 8px 10px; }
+      /* 1: Box */
+      #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) {
+        width: 72px; white-space: nowrap;
+      }
+      /* 2: Food (truncate) */
+      #ordersTable th:nth-child(2), #ordersTable td:nth-child(2) {
+        width: 160px; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      /* 3: Pax */
+      #ordersTable th:nth-child(3), #ordersTable td:nth-child(3) {
+        width: 64px; white-space: nowrap;
+      }
+      /* 4: Scheduled Time */
+      #ordersTable th:nth-child(4), #ordersTable td:nth-child(4) {
+        width: 124px; white-space: nowrap;
+      }
+      /* 5: Action */
+      #ordersTable th:nth-child(5), #ordersTable td:nth-child(5) {
+        width: 172px; white-space: nowrap;
+      }
+    }
   </style>
   <!-- Excel parser for reading example.xlsx when hosted -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -163,24 +193,24 @@
     </table>
   </section>
 
-  <section id="ordersView" style="display:none;">
-    <table id="ordersTable">
-      <thead>
-        <tr>
-          <th>Box</th>
-          <th>Food</th>
-          <th>Pax</th>
-          <th>Scheduled Time</th>
-          <th>Time Received</th>
-          <th>Time Given</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- rows will be inserted by JavaScript -->
-      </tbody>
-    </table>
-  </section>
+    <section id="ordersView" style="display:none;">
+      <table id="ordersTable">
+        <thead>
+          <tr>
+            <th>Box</th>
+            <th>Food</th>
+            <th>Pax</th>
+            <th>Scheduled Time</th>
+            <th>Action</th>
+            <th>Time Received</th>
+            <th>Time Given</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- rows will be inserted by JavaScript -->
+        </tbody>
+      </table>
+    </section>
 
   <section id="onDayView" style="display:none;">
     <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;">
@@ -756,6 +786,10 @@
             </div>
           </td>
           <td>
+            <button type="button" onclick="onRowClick(${index}); event.stopPropagation();">Update</button>
+            <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();">Reset</button>
+          </td>
+          <td>
             <div class="time-cell">
               <span class="${received ? '' : 'muted'}">${received || '—'}</span>
               <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeReceived'); event.stopPropagation();">✏️</button>
@@ -766,10 +800,6 @@
               <span class="${given ? '' : 'muted'}">${given || '—'}</span>
               <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeGiven'); event.stopPropagation();">✏️</button>
             </div>
-          </td>
-          <td>
-            <button type="button" onclick="onRowClick(${index}); event.stopPropagation();">Update</button>
-            <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();">Reset</button>
           </td>
         `;
 
@@ -926,7 +956,7 @@
       saveToLocal();
       closeModal();
       renderAll();
-      setActiveTab('orders');
+      // Stay on the current tab (do not auto-switch to Orders)
     }
 
     // Wire up actions
