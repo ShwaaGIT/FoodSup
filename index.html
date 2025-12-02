@@ -140,34 +140,24 @@
       .pax-inline { display: none; }
     }
 
-    /* Mobile/tablet: fit Box, Food, Time, Action on-screen */
+    /* Mobile/tablet: fit all 6 columns on-screen */
     @media (max-width: 899px) {
-      /* Slightly tighter spacing inside time cells */
-      .time-cell { gap: 6px; }
-
-      /* Constrain Orders table columns */
+      .time-cell { gap: 4px; }
       #ordersTable { table-layout: fixed; }
-      #ordersTable th, #ordersTable td { padding: 8px 10px; }
+      #ordersTable th, #ordersTable td { padding: 6px 4px; font-size: 16px; }
+      .icon-btn { padding: 4px 6px; min-height: 28px; min-width: 28px; font-size: 16px; }
       /* 1: Box */
-      #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) {
-        width: 68px; white-space: nowrap;
-      }
+      #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) { width: 32px; white-space: nowrap; }
       /* 2: Food (truncate) */
-      #ordersTable th:nth-child(2), #ordersTable td:nth-child(2) {
-        width: 170px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
-      /* 3: Pax — hide on small screens to keep essentials visible */
-      #ordersTable th:nth-child(3), #ordersTable td:nth-child(3) {
-        display: none;
-      }
-      /* 4: Scheduled Time */
-      #ordersTable th:nth-child(4), #ordersTable td:nth-child(4) {
-        width: 116px; white-space: nowrap;
-      }
-      /* 5: Action */
-      #ordersTable th:nth-child(5), #ordersTable td:nth-child(5) {
-        width: 168px; white-space: nowrap;
-      }
+      #ordersTable th:nth-child(2), #ordersTable td:nth-child(2) { width: 100px; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* 3: Scheduled Time */
+      #ordersTable th:nth-child(3), #ordersTable td:nth-child(3) { width: 60px; white-space: nowrap; }
+      /* 4: Time Received */
+      #ordersTable th:nth-child(4), #ordersTable td:nth-child(4) { width: 56px; white-space: nowrap; }
+      /* 5: Time Given */
+      #ordersTable th:nth-child(5), #ordersTable td:nth-child(5) { width: 56px; white-space: nowrap; }
+      /* 6: Reset */
+      #ordersTable th:nth-child(6), #ordersTable td:nth-child(6) { width: 40px; white-space: nowrap; text-align: center; }
     }
   </style>
   <!-- Excel parser for reading example.xlsx when hosted -->
@@ -202,11 +192,10 @@
           <tr>
             <th>Box</th>
             <th>Food</th>
-            <th>Pax</th>
-            <th>Scheduled Time</th>
-            <th>Action</th>
-            <th>Time Received</th>
-            <th>Time Given</th>
+            <th title="Scheduled Time">Time</th>
+            <th title="Time Received">Rec</th>
+            <th title="Time Given">Gvn</th>
+            <th title="Reset"></th>
           </tr>
         </thead>
         <tbody>
@@ -781,7 +770,6 @@
         tr.innerHTML = `
           <td>${order.box}</td>
           <td>${order.food} <span class="pax-inline muted">(x${order.pax})</span></td>
-          <td>${order.pax}</td>
           <td>
             <div class="time-cell">
               <span class="${scheduled ? '' : 'muted'}">${scheduled || '—'}</span>
@@ -789,20 +777,19 @@
             </div>
           </td>
           <td>
-            <button type="button" onclick="onRowClick(${index}); event.stopPropagation();">Update</button>
-            <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();">Reset</button>
-          </td>
-          <td>
             <div class="time-cell">
               <span class="${received ? '' : 'muted'}">${received || '—'}</span>
-              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeReceived'); event.stopPropagation();">✏️</button>
+              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeReceived'); event.stopPropagation();" aria-label="Edit Received">✏️</button>
             </div>
           </td>
           <td>
             <div class="time-cell">
               <span class="${given ? '' : 'muted'}">${given || '—'}</span>
-              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeGiven'); event.stopPropagation();">✏️</button>
+              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeGiven'); event.stopPropagation();" aria-label="Edit Given">✏️</button>
             </div>
+          </td>
+          <td>
+            <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();" aria-label="Reset" title="Reset">↺</button>
           </td>
         `;
 
