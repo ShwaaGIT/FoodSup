@@ -77,6 +77,8 @@
     .muted {
       color: #999;
     }
+    /* Inline pax next to Food for small screens; hidden on desktop */
+    .pax-inline { display: inline; }
     /* Tabs spanning full width; sticky on phones */
     .tabs {
       display: flex;
@@ -135,9 +137,10 @@
       button, .icon-btn { font-size: 14px; padding: 8px 10px; min-height: 36px; }
       input, select { font-size: 14px; padding: 8px 10px; min-height: 36px; }
       .tabs .tab-btn { font-size: 14px; padding: 10px 8px; border-radius: 6px; }
+      .pax-inline { display: none; }
     }
 
-    /* Mobile/tablet: fit first 5 Orders columns on-screen */
+    /* Mobile/tablet: fit Box, Food, Time, Action on-screen */
     @media (max-width: 899px) {
       /* Slightly tighter spacing inside time cells */
       .time-cell { gap: 6px; }
@@ -147,23 +150,23 @@
       #ordersTable th, #ordersTable td { padding: 8px 10px; }
       /* 1: Box */
       #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) {
-        width: 72px; white-space: nowrap;
+        width: 68px; white-space: nowrap;
       }
       /* 2: Food (truncate) */
       #ordersTable th:nth-child(2), #ordersTable td:nth-child(2) {
-        width: 160px; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        width: 170px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      /* 3: Pax */
+      /* 3: Pax — hide on small screens to keep essentials visible */
       #ordersTable th:nth-child(3), #ordersTable td:nth-child(3) {
-        width: 64px; white-space: nowrap;
+        display: none;
       }
       /* 4: Scheduled Time */
       #ordersTable th:nth-child(4), #ordersTable td:nth-child(4) {
-        width: 124px; white-space: nowrap;
+        width: 116px; white-space: nowrap;
       }
       /* 5: Action */
       #ordersTable th:nth-child(5), #ordersTable td:nth-child(5) {
-        width: 172px; white-space: nowrap;
+        width: 168px; white-space: nowrap;
       }
     }
   </style>
@@ -777,7 +780,7 @@
 
         tr.innerHTML = `
           <td>${order.box}</td>
-          <td>${order.food}</td>
+          <td>${order.food} <span class="pax-inline muted">(x${order.pax})</span></td>
           <td>${order.pax}</td>
           <td>
             <div class="time-cell">
