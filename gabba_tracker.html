@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Food Tracker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      max-width: 1000px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 6px 8px;
+      text-align: left;
+      font-size: 14px;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    tr.status-waiting {
+      background: #f9f9f9;
+    }
+    tr.status-sent {
+      background: #ffe4b3; /* orange-ish */
+    }
+    tr.status-served {
+      background: #c8f7c5; /* light green */
+    }
+    button {
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .small {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .toolbar input[type="file"] {
+      display: inline-block;
+    }
+    .time-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .icon-btn {
+      padding: 2px 6px;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .muted {
+      color: #999;
+    }
+    /* Tabs spanning full width */
+    .tabs { display: flex; width: 100%; }
+    .tabs .tab-btn {
+      flex: 1 1 0;
+      text-align: center;
+      padding: 10px 6px;
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .tabs .tab-btn + .tab-btn { margin-left: 6px; }
+    /* Attendance row colors */
+    .att-not-here {
+      background: #ffe5e5; /* light red */
+    }
+    .att-here {
+      background: #e7f7e7; /* light green */
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="tabs" style="margin-top: 8px; margin-bottom: 8px;">
+    <button id="tabAttendance" class="tab-btn" type="button">Attendance</button>
+    <button id="tabOrders" class="tab-btn" type="button">Orders</button>
+    <button id="tabOnDay" class="tab-btn" type="button">On Day</button>
+  </nav>
+  <!-- Top toolbar removed per request -->
+
+  <section id="attendanceView" style="display:none;">
+    <table id="attendanceTable">
+      <thead>
+        <tr>
+          <th>Box</th>
+          <th>Status</th>
+          <th>Arrived At</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="ordersView" style="display:none;">
+    <table id="ordersTable">
+      <thead>
+        <tr>
+          <th>Box</th>
+          <th>Food</th>
+          <th>Pax</th>
+          <th>Scheduled Time</th>
+          <th>Time Received</th>
+          <th>Time Given</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- rows will be inserted by JavaScript -->
+      </tbody>
+    </table>
+  </section>
+
+  <section id="onDayView" style="display:none;">
+    <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;">
+      <label>Box<br><input id="onDayBox" type="number" min="1" step="1" style="width:100px;"></label>
+      <label>Food<br><input id="onDayFood" type="text" placeholder="e.g. Hot Chips" style="min-width:180px;"></label>
+      <label>Pax<br><input id="onDayPax" type="number" min="1" step="1" value="1" style="width:80px;"></label>
+      <label>Time<br><input id="onDayTime" type="time" style="width:120px;"></label>
+      <button id="onDayAddBtn" type="button">Add Item</button>
+    </div>
+    <table id="onDayTable">
+      <thead>
+        <tr>
+          <th>Box</th>
+          <th>Food</th>
+          <th>Pax</th>
+          <th>Scheduled Time</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- Bottom actions -->
+  <div class="footer-actions" style="margin-top:16px;">
+    <button id="resetAllBtn" type="button">Reset All</button>
+  </div>
+
+  <!-- Modal for editing all items of a box on arrival -->
+  <div id="modalOverlay" style="position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:16px; border-radius:6px; width:min(600px, 90vw); max-height:80vh; overflow:auto;">
+      <h3 id="modalTitle" style="margin-top:0;">Confirm Arrival & Check Times</h3>
+      <div id="modalBody" class="small"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+        <button id="modalCancelBtn" type="button">Cancel</button>
+        <button id="modalSaveBtn" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Using built-in example data only (upload disabled)
+    // === DEFAULT EXAMPLE DATA (used when no local save or CSV loaded) ===
+    const defaultOrders = [
+      {
+        box: 3211,
+        food: "Hot Chips",
+        pax: 1,
+        scheduledTime: "08:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3212,
+        food: "Sushi",
+        pax: 10,
+        scheduledTime: "08:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3213,
+        food: "Karaage Burgers",
+        pax: 8,
+        scheduledTime: "08:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3233,
+        food: "Karaage Burgers",
+        pax: 10,
+        scheduledTime: "08:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3245,
+        food: "Karaage Burgers",
+        pax: 12,
+        scheduledTime: "08:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3211,
+        food: "Hot Chips",
+        pax: 1,
+        scheduledTime: "08:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3212,
+        food: "Karaage Burgers",
+        pax: 10,
+        scheduledTime: "08:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3213,
+        food: "Karaage Burgers",
+        pax: 8,
+        scheduledTime: "08:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3233,
+        food: "Karaage Burgers",
+        pax: 10,
+        scheduledTime: "08:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3245,
+        food: "Karaage Burgers",
+        pax: 12,
+        scheduledTime: "08:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3211,
+        food: "Hot Chips",
+        pax: 1,
+        scheduledTime: "09:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3212,
+        food: "Party Pies",
+        pax: 10,
+        scheduledTime: "09:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3213,
+        food: "Karaage Burgers",
+        pax: 8,
+        scheduledTime: "09:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3233,
+        food: "Party Pies",
+        pax: 10,
+        scheduledTime: "09:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3245,
+        food: "Party Pies",
+        pax: 12,
+        scheduledTime: "09:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3211,
+        food: "Hot Chips",
+        pax: 1,
+        scheduledTime: "09:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3233,
+        food: "Hot Chips",
+        pax: 2,
+        scheduledTime: "09:30",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3212,
+        food: "Sausage Rolls",
+        pax: 10,
+        scheduledTime: "10:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3213,
+        food: "Cheese Board",
+        pax: 1,
+        scheduledTime: "10:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3233,
+        food: "Sausage Rolls",
+        pax: 8,
+        scheduledTime: "10:00",
+        timeReceived: null,
+        timeGiven: null
+      },
+      {
+        box: 3245,
+        food: "Magnums",
+        pax: 10,
+        scheduledTime: "10:00",
+        timeReceived: null,
+        timeGiven: null
+      }
+    ];
+
+    // State
+    let orders = [];
+    let attendance = {}; // { [box]: { arrived: boolean, arrivedAt: string|null } }
+    let templateOrders = []; // baseline used by Reset
+
+    let orderUidCounter = 1;
+    function ensureOrderIds(list) {
+      list.forEach(o => {
+        if (o._id == null) o._id = orderUidCounter++;
+      });
+      return list;
+    }
+
+    function ensureBaselines(list) {
+      list.forEach(o => {
+        if (o.baselineScheduledTime == null || o.baselineScheduledTime === '') {
+          o.baselineScheduledTime = o.scheduledTime || '';
+        }
+      });
+      return list;
+    }
+
+    function buildInitialAttendance(list) {
+      const map = {};
+      const seen = new Set();
+      list.forEach(o => {
+        if (!seen.has(o.box)) {
+          seen.add(o.box);
+          map[o.box] = { arrived: false, arrivedAt: null };
+        }
+      });
+      return map;
+    }
+
+    function timeToMinutes(str) {
+      if (!str || !isValidTime(str)) return Number.POSITIVE_INFINITY;
+      const [h, m] = str.split(":").map(Number);
+      return h * 60 + m;
+    }
+
+    function sortOrders() {
+      orders.sort((a, b) => {
+        const ta = timeToMinutes(a.scheduledTime);
+        const tb = timeToMinutes(b.scheduledTime);
+        if (ta !== tb) return ta - tb;
+        // stable-ish tie-breaker: preserve input order via _seq
+        return (a._seq ?? 0) - (b._seq ?? 0);
+      });
+    }
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function getCurrentTimeString() {
+      const now = new Date();
+      return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`; // 24h HH:MM
+    }
+
+    function getStatus(order) {
+      if (!order.timeReceived && !order.timeGiven) return "waiting";
+      if (order.timeReceived && !order.timeGiven) return "sent";
+      if (order.timeReceived && order.timeGiven) return "served";
+      return "waiting";
+    }
+
+    function saveToLocal() {
+      try {
+        localStorage.setItem("gabbaState", JSON.stringify({ orders, attendance, template: templateOrders }));
+      } catch (e) {
+        console.warn("Could not save to localStorage", e);
+      }
+    }
+
+    function loadFromLocal() {
+      try {
+        const rawNew = localStorage.getItem("gabbaState");
+        if (rawNew) {
+          const obj = JSON.parse(rawNew);
+          if (obj && Array.isArray(obj.orders) && typeof obj.attendance === 'object') {
+            return obj;
+          }
+        }
+        // Fallback for legacy key storing only orders
+        const rawOld = localStorage.getItem("gabbaOrders");
+        if (rawOld) {
+          const arr = JSON.parse(rawOld);
+          if (Array.isArray(arr)) {
+            return { orders: arr, attendance: buildInitialAttendance(arr), template: arr };
+          }
+        }
+        return null;
+      } catch (e) {
+        console.warn("Could not load from localStorage", e);
+        return null;
+      }
+    }
+
+    function onRowClick(index) {
+      const order = orders[index];
+      if (!order.timeReceived) {
+        // First click: sent to chef
+        order.timeReceived = getCurrentTimeString();
+      } else if (!order.timeGiven) {
+        // Second click: served to customer
+        order.timeGiven = getCurrentTimeString();
+      } else {
+        // Optional: third click to reset (uncomment if you want that)
+        // order.timeReceived = null;
+        // order.timeGiven = null;
+      }
+      saveToLocal();
+      renderTable();
+    }
+
+    function isValidTime(str) {
+      if (!str) return false;
+      // Accept HH:MM (24h)
+      const m = String(str).trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+      return !!m;
+    }
+
+    function normalizeTimeString(raw) {
+      if (raw == null) return '';
+      let s = String(raw).trim();
+      if (!s) return '';
+      // AM/PM variants, e.g., 8, 8:5, 8:05am
+      let m = s.match(/^([0-1]?\d|2[0-3])(?::?(\d{1,2}))?\s*(am|pm)$/i);
+      if (m) {
+        let h = parseInt(m[1], 10);
+        let min = parseInt(m[2] || '0', 10);
+        const ampm = m[3].toLowerCase();
+        if (ampm === 'pm' && h < 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        if (min > 59) min = 59;
+        return `${pad2(h)}:${pad2(min)}`;
+      }
+      // HH:MM (any single/double-digit hour/min)
+      m = s.match(/^([0-2]?\d):(\d{1,2})$/);
+      if (m) {
+        let h = Math.min(parseInt(m[1], 10), 23);
+        let min = Math.min(parseInt(m[2], 10), 59);
+        return `${pad2(h)}:${pad2(min)}`;
+      }
+      // HMM or HHMM like 915 -> 09:15
+      m = s.match(/^([0-2]?\d)(\d{2})$/);
+      if (m) {
+        let h = Math.min(parseInt(m[1], 10), 23);
+        let min = Math.min(parseInt(m[2], 10), 59);
+        return `${pad2(h)}:${pad2(min)}`;
+      }
+      // Decimal day fraction (CSV text), e.g. 0.5 => 12:00
+      if (/^0?\.\d+$/.test(s)) {
+        const num = parseFloat(s);
+        if (!isNaN(num)) {
+          const total = Math.round(num * 24 * 60) % (24*60);
+          const h = Math.floor(total / 60);
+          const min = total % 60;
+          return `${pad2(h)}:${pad2(min)}`;
+        }
+      }
+      // Already valid HH:MM
+      if (isValidTime(s)) return s.length === 4 ? `0${s}` : s;
+      return s; // leave as-is; downstream validation may reject
+    }
+
+    function editTime(index, field) {
+      const order = orders[index];
+      const current = order[field] || "";
+      let val = prompt("Enter time as HH:MM (or 'now' to use current time). Empty to clear.", current);
+      if (val === null) return; // canceled
+      val = String(val).trim();
+      if (val.toLowerCase() === "now") {
+        order[field] = getCurrentTimeString();
+      } else if (val === "") {
+        order[field] = null;
+      } else if (isValidTime(val)) {
+        order[field] = val;
+      } else {
+        alert("Invalid time. Please use HH:MM in 24-hour format, e.g. 09:30 or 17:05.");
+        return;
+      }
+      saveToLocal();
+      renderTable();
+    }
+
+    function resetRow(index) {
+      orders[index].timeReceived = null;
+      orders[index].timeGiven = null;
+      saveToLocal();
+      renderTable();
+    }
+
+    function resetAll() {
+      if (!confirm("Restart shift from the example sheet? This discards current progress.")) return;
+      const base = defaultOrders;
+      orders = base.map((o, i) => ({ ...o, _seq: i, _id: undefined, baselineScheduledTime: o.scheduledTime || '' }));
+      orderUidCounter = 1; // restart ID counter
+      ensureOrderIds(orders);
+      ensureBaselines(orders);
+      attendance = buildInitialAttendance(orders);
+      saveToLocal();
+      renderAll();
+      setActiveTab('attendance');
+    }
+
+    // CSV helpers (simple format, no quoted commas)
+    function ordersToCsv(list) {
+      const header = ["Box","Food","Pax","Scheduled Time","Time Received","Time Given"]; 
+      const rows = list.map(o => [o.box, o.food, o.pax, o.scheduledTime||"", o.timeReceived||"", o.timeGiven||""]);
+      const lines = [header, ...rows].map(cols => cols.map(c => String(c).replaceAll("\"","\"\"")).map(c => /[,"]/.test(c) ? `"${c}"` : c).join(","));
+      return lines.join("\n");
+    }
+
+    function downloadCsv() {
+      const csv = ordersToCsv(orders);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `gabba_food_tracker_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function parseCsv(text) {
+      // Very lightweight CSV: handles quoted fields, no newlines within fields
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length === 0) return [];
+      // Parse a CSV line
+      const parseLine = (line) => {
+        const out = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (line[i+1] === '"') { cur += '"'; i++; }
+              else { inQuotes = false; }
+            } else { cur += ch; }
+          } else {
+            if (ch === ',') { out.push(cur); cur = ''; }
+            else if (ch === '"') { inQuotes = true; }
+            else { cur += ch; }
+          }
+        }
+        out.push(cur);
+        return out;
+      };
+
+      const header = parseLine(lines[0]).map(h => h.trim().toLowerCase());
+      const getIdx = (name) => header.indexOf(name.toLowerCase());
+      const idxBox = getIdx("box");
+      const idxFood = getIdx("food");
+      const idxPax = getIdx("pax");
+      const idxSched = getIdx("scheduled time");
+      const idxRec = getIdx("time received");
+      const idxGiven = getIdx("time given");
+
+      if (idxBox === -1 || idxFood === -1 || idxPax === -1) {
+        throw new Error("CSV must include headers: Box, Food, Pax. Optional: Scheduled Time, Time Received, Time Given.");
+      }
+
+      const result = [];
+      for (let li = 1; li < lines.length; li++) {
+        const cols = parseLine(lines[li]);
+        if (cols.every(c => c.trim() === '')) continue;
+        const obj = {
+          box: Number(cols[idxBox] || 0) || cols[idxBox],
+          food: (cols[idxFood] || '').trim(),
+          pax: Number(cols[idxPax] || 0) || 0,
+          scheduledTime: normalizeTimeString(idxSched !== -1 ? (cols[idxSched] || '') : ''),
+          timeReceived: (idxRec !== -1 ? normalizeTimeString(cols[idxRec] || '') : '') || null,
+          timeGiven: (idxGiven !== -1 ? normalizeTimeString(cols[idxGiven] || '') : '') || null,
+        };
+        result.push(obj);
+      }
+      return result;
+    }
+
+    // XLSX/CSV upload removed per request; using built-in example only.
+
+    function renderOrdersTable() {
+      const tbody = document.querySelector("#ordersTable tbody");
+      tbody.innerHTML = "";
+      sortOrders();
+      orders.forEach((order, index) => {
+        if (!attendance[order.box] || !attendance[order.box].arrived) return; // only show arrived boxes
+        const tr = document.createElement("tr");
+        tr.className = "status-" + getStatus(order);
+
+        tr.onclick = (e) => {
+          if (e.target.tagName.toLowerCase() !== "button") {
+            onRowClick(index);
+          }
+        };
+
+        const scheduled = order.scheduledTime || "";
+        const received = order.timeReceived || "";
+        const given = order.timeGiven || "";
+
+        tr.innerHTML = `
+          <td>${order.box}</td>
+          <td>${order.food}</td>
+          <td>${order.pax}</td>
+          <td>
+            <div class="time-cell">
+              <span class="${scheduled ? '' : 'muted'}">${scheduled || '—'}</span>
+              <button class="icon-btn" type="button" onclick="editTime(${index}, 'scheduledTime'); event.stopPropagation();">✏️</button>
+            </div>
+          </td>
+          <td>
+            <div class="time-cell">
+              <span class="${received ? '' : 'muted'}">${received || '—'}</span>
+              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeReceived'); event.stopPropagation();">✏️</button>
+            </div>
+          </td>
+          <td>
+            <div class="time-cell">
+              <span class="${given ? '' : 'muted'}">${given || '—'}</span>
+              <button class="icon-btn" type="button" onclick="editTime(${index}, 'timeGiven'); event.stopPropagation();">✏️</button>
+            </div>
+          </td>
+          <td>
+            <button type="button" onclick="onRowClick(${index}); event.stopPropagation();">Update</button>
+            <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();">Reset</button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderAttendanceTable() {
+      const tbody = document.querySelector('#attendanceTable tbody');
+      tbody.innerHTML = '';
+      // one line per unique box, sorted: Not here first, then by box number
+      const boxes = Array.from(new Set(orders.map(o => o.box))).sort((a,b) => {
+        const attA = attendance[a] || { arrived: false };
+        const attB = attendance[b] || { arrived: false };
+        const sa = attA.arrived ? 1 : 0; // 0 = not here, 1 = here
+        const sb = attB.arrived ? 1 : 0;
+        if (sa !== sb) return sa - sb;
+        return Number(a) - Number(b);
+      });
+      boxes.forEach(box => {
+        const row = document.createElement('tr');
+        const att = attendance[box] || { arrived: false, arrivedAt: null };
+        row.className = att.arrived ? 'att-here' : 'att-not-here';
+        row.innerHTML = `
+          <td>${box}</td>
+          <td>${att.arrived ? 'Here' : 'Not here'}</td>
+          <td>${att.arrivedAt || ''}</td>
+          <td>
+            ${att.arrived
+              ? `<button type="button" onclick="openViewChanges(${box}); event.stopPropagation();">View Time Changes</button>`
+              : `<button type=\"button\" onclick=\"openArrivalEditor(${box}); event.stopPropagation();\">Mark Here</button>`}
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function renderTable() {
+      // kept for backward calls; render both
+      renderOrdersTable();
+    }
+
+    function renderAll() {
+      renderAttendanceTable();
+      renderOrdersTable();
+      renderOnDayTable();
+    }
+
+    // Tabs
+    function setActiveTab(tab) {
+      const attendanceEl = document.getElementById('attendanceView');
+      const ordersEl = document.getElementById('ordersView');
+      const onDayEl = document.getElementById('onDayView');
+      if (tab === 'attendance') {
+        attendanceEl.style.display = '';
+        ordersEl.style.display = 'none';
+        onDayEl.style.display = 'none';
+      } else {
+        attendanceEl.style.display = 'none';
+        if (tab === 'orders') {
+          ordersEl.style.display = '';
+          onDayEl.style.display = 'none';
+        } else if (tab === 'onDay') {
+          ordersEl.style.display = 'none';
+          onDayEl.style.display = '';
+        }
+      }
+      // Visual state (simple): bold active tab
+      document.getElementById('tabAttendance').style.fontWeight = tab==='attendance' ? 'bold' : 'normal';
+      document.getElementById('tabOrders').style.fontWeight = tab==='orders' ? 'bold' : 'normal';
+      document.getElementById('tabOnDay').style.fontWeight = tab==='onDay' ? 'bold' : 'normal';
+    }
+
+    // Modal for arrival/time check and viewing changes
+    let currentModalBox = null;
+    let currentModalMode = null; // 'arrival' | 'view'
+    function setModalUI(mode, title, showSave, cancelText) {
+      currentModalMode = mode;
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalSaveBtn').style.display = showSave ? '' : 'none';
+      document.getElementById('modalCancelBtn').textContent = cancelText || (showSave ? 'Cancel' : 'Close');
+    }
+
+    function fmtTime(t) { return t && t.trim() ? t : '—'; }
+    function openArrivalEditor(box) {
+      currentModalBox = box;
+      setModalUI('arrival', `Confirm Arrival & Check Times — Box ${box}`, true, 'Cancel');
+      const items = orders.filter(o => o.box === box).slice().sort((a,b)=>{
+        const fa = (a.food||'').toLowerCase();
+        const fb = (b.food||'').toLowerCase();
+        if (fa !== fb) return fa < fb ? -1 : 1;
+        return (a.pax||0) - (b.pax||0);
+      });
+      const container = document.getElementById('modalBody');
+      // Build simple editor list
+      const arrived = attendance[box] && attendance[box].arrived;
+      const lines = items.map((o) => {
+        const defaultTime = arrived ? (o.scheduledTime || '') : (o.baselineScheduledTime || o.scheduledTime || '');
+        return `
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+          <div style="flex:1;">${o.food}</div>
+          <div style="width:50px; text-align:right;">x${o.pax}</div>
+          <label style="white-space:nowrap;">Time: <input type="time" value="${defaultTime}" data-id="${o._id}" style="min-width:110px;"></label>
+        </div>
+        `;
+      }).join('');
+      container.innerHTML = `<div class="small">Box ${box}: review scheduled times for all items.</div>${lines}`;
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function openViewChanges(box) {
+      currentModalBox = box;
+      setModalUI('view', `Time Changes — Box ${box}`, false, 'Close');
+      const items = orders.filter(o => o.box === box);
+      const changed = items.filter(o => (o.scheduledTime || '') !== (o.baselineScheduledTime || ''))
+                           .sort((a,b)=> (a.food||'').localeCompare(b.food||''));
+      const container = document.getElementById('modalBody');
+      if (!changed.length) {
+        container.innerHTML = `<div>No time changes for this box.</div>`;
+      } else {
+        const rows = changed.map(o => `
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+            <div style="flex:1;">${o.food} <span class="muted">(x${o.pax})</span></div>
+            <div style="white-space:nowrap;">${fmtTime(o.baselineScheduledTime)} → <strong>${fmtTime(o.scheduledTime)}</strong></div>
+          </div>
+        `).join('');
+        container.innerHTML = rows;
+      }
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').style.display = 'none';
+      currentModalBox = null;
+      currentModalMode = null;
+    }
+
+    function saveArrivalEdits() {
+      if (currentModalBox == null) return closeModal();
+      // collect inputs
+      const container = document.getElementById('modalBody');
+      const inputs = container.querySelectorAll('input[type="time"]');
+      inputs.forEach(inp => {
+        const id = Number(inp.getAttribute('data-id'));
+        const val = inp.value || '';
+        const item = orders.find(o => o._id === id);
+        if (item) item.scheduledTime = val || '';
+      });
+      // mark arrival time after checks
+      const rec = attendance[currentModalBox] || { arrived: false, arrivedAt: null };
+      rec.arrived = true;
+      if (!rec.arrivedAt) rec.arrivedAt = getCurrentTimeString();
+      attendance[currentModalBox] = rec;
+      saveToLocal();
+      closeModal();
+      renderAll();
+      setActiveTab('orders');
+    }
+
+    // Wire up actions
+    document.getElementById('resetAllBtn').addEventListener('click', (e) => { e.stopPropagation(); resetAll(); });
+    document.getElementById('tabAttendance').addEventListener('click', () => setActiveTab('attendance'));
+    document.getElementById('tabOrders').addEventListener('click', () => setActiveTab('orders'));
+    document.getElementById('tabOnDay').addEventListener('click', () => setActiveTab('onDay'));
+    document.getElementById('modalCancelBtn').addEventListener('click', () => closeModal());
+    document.getElementById('modalSaveBtn').addEventListener('click', () => saveArrivalEdits());
+
+    // Bootstrap state: localStorage > default data
+    const saved = loadFromLocal();
+    let initialOrders;
+    if (saved && Array.isArray(saved.orders)) {
+      initialOrders = saved.orders;
+      attendance = saved.attendance || buildInitialAttendance(initialOrders);
+      // Force template to built-in example every time
+      templateOrders = defaultOrders.slice();
+    } else {
+      initialOrders = defaultOrders.slice();
+      attendance = buildInitialAttendance(initialOrders);
+      templateOrders = defaultOrders.slice();
+    }
+    orders = initialOrders.map((o, i) => ({ ...o, _seq: i, baselineScheduledTime: (o.baselineScheduledTime != null ? o.baselineScheduledTime : (o.scheduledTime || '')) }));
+    ensureOrderIds(orders);
+    ensureBaselines(orders);
+    renderAll();
+    setActiveTab('attendance');
+
+    // On Day helpers
+    function addOnDayItem() {
+      const boxEl = document.getElementById('onDayBox');
+      const foodEl = document.getElementById('onDayFood');
+      const paxEl = document.getElementById('onDayPax');
+      const timeEl = document.getElementById('onDayTime');
+      const boxVal = Number(boxEl.value);
+      const foodVal = String(foodEl.value || '').trim();
+      const paxVal = Number(paxEl.value || 1) || 1;
+      const timeValRaw = String(timeEl.value || '').trim();
+      const timeVal = normalizeTimeString(timeValRaw);
+      if (!boxVal || !foodVal || !isValidTime(timeVal)) {
+        alert('Please enter Box, Food, and a valid time (HH:MM).');
+        return;
+      }
+      const newItem = {
+        box: boxVal,
+        food: foodVal,
+        pax: paxVal,
+        scheduledTime: timeVal,
+        baselineScheduledTime: timeVal,
+        timeReceived: null,
+        timeGiven: null,
+        onDay: true,
+        _seq: orders.length + 1,
+        _id: orderUidCounter++
+      };
+      orders.push(newItem);
+      // ensure attendance entry exists and mark box as here immediately
+      if (!attendance[boxVal]) attendance[boxVal] = { arrived: false, arrivedAt: null };
+      attendance[boxVal].arrived = true;
+      if (!attendance[boxVal].arrivedAt) attendance[boxVal].arrivedAt = getCurrentTimeString();
+      saveToLocal();
+      renderAll();
+      // reset inputs
+      foodEl.value = '';
+      paxEl.value = '1';
+      timeEl.value = '';
+      // keep box for quick multiple adds
+    }
+
+    function renderOnDayTable() {
+      const tbody = document.querySelector('#onDayTable tbody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      const items = orders.filter(o => o.onDay);
+      if (!items.length) return;
+      items.forEach(o => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${o.box}</td>
+          <td>${o.food}</td>
+          <td>${o.pax}</td>
+          <td>${o.scheduledTime || ''}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('onDayAddBtn').addEventListener('click', addOnDayItem);
+  </script>
+</body>
+</html>
