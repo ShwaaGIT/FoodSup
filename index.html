@@ -170,6 +170,8 @@
       document.head.appendChild(s);
     }
   </script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#ffffff" />
 </head>
 <body>
 
@@ -1241,6 +1243,12 @@
 
     // Bootstrap state: localStorage > example.xlsx > default data
     (async function init() {
+      // Register service worker for offline support
+      if ('serviceWorker' in navigator) {
+        try {
+          navigator.serviceWorker.register('./sw.js');
+        } catch (e) { /* ignore */ }
+      }
       const saved = loadFromLocal();
       let initialOrders;
       if (saved && Array.isArray(saved.orders)) {

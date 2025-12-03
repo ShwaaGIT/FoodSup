@@ -1,0 +1,10 @@
+{
+  "name": "Food Tracker",
+  "short_name": "FoodTracker",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": []
+}
+
