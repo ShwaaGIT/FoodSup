@@ -965,6 +965,8 @@
       document.getElementById('modalTitle').textContent = title;
       document.getElementById('modalSaveBtn').style.display = showSave ? '' : 'none';
       document.getElementById('modalCancelBtn').textContent = cancelText || (showSave ? 'Cancel' : 'Close');
+      // Ensure cancel is visible by default; specific screens may hide it
+      document.getElementById('modalCancelBtn').style.display = '';
     }
 
     function fmtTime(t) { return t && t.trim() ? t : '—'; }
@@ -1101,6 +1103,15 @@
     document.getElementById('tabOnDay').addEventListener('click', () => setActiveTab('onDay'));
     document.getElementById('modalCancelBtn').addEventListener('click', () => closeModal());
     document.getElementById('modalSaveBtn').addEventListener('click', () => saveArrivalEdits());
+    // Click outside modal content to close Summary quickly
+    (function(){
+      const overlay = document.getElementById('modalOverlay');
+      if (overlay) {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay && currentModalMode === 'summary') closeModal();
+        });
+      }
+    })();
 
     // Import Excel (.xlsx/.xls) from local file
     async function importXlsxFromFile(file) {
@@ -1222,6 +1233,8 @@
       const container = document.getElementById('modalBody');
       container.innerHTML = html;
       document.getElementById('modalOverlay').style.display = 'flex';
+      // Hide the Close button for Summary; allow tapping outside to dismiss
+      document.getElementById('modalCancelBtn').style.display = 'none';
     }
     const summaryBtn = document.getElementById('summaryBtn');
     if (summaryBtn) summaryBtn.addEventListener('click', openSummary);
