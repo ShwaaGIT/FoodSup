@@ -974,7 +974,7 @@
     function fmtTime(t) { return t && t.trim() ? t : '—'; }
     function openArrivalEditor(box) {
       currentModalBox = box;
-      setModalUI('arrival', `Confirm Arrival & Check Times — Box ${box}`, true, 'Cancel');
+      setModalUI('arrival', `Box ${box}`, true, 'Cancel');
       const arrived = attendance[box] && attendance[box].arrived;
       const items = orders.filter(o => o.box === box).slice();
       const toMinutes = (t) => {
@@ -1006,7 +1006,7 @@
         </div>
         `;
       }).join('');
-      container.innerHTML = `<div class="small">Box ${box}: review scheduled times for all items.</div>${lines}`;
+      container.innerHTML = lines;
       document.getElementById('modalOverlay').style.display = 'flex';
     }
 
@@ -1203,35 +1203,27 @@
         if (sa !== sb) return sa - sb;
         return 0;
       });
-      const rows = items.map(o => {
-        const hist = Array.isArray(o.history) ? o.history.filter(h => h.type === 'reset') : [];
-        const lastReset = hist.length ? hist[hist.length - 1] : null;
-        const prevBits = lastReset ? `Prev: R ${formatTime12(lastReset.prevReceived||'') || '—'}, G ${formatTime12(lastReset.prevGiven||'') || '—'} (reset ${formatTime12(lastReset.resetAt||'') || ''})` : '';
+      const cards = items.map(o => {
+        const rec = formatTime12(o.timeReceived||'') || '—';
+        const gvn = formatTime12(o.timeGiven||'') || '—';
+        const tim = formatTime12(o.scheduledTime||'') || '—';
+        const hist = Array.isArray(o.history) ? o.history.filter(h=>h.type==='reset') : [];
+        const last = hist.length ? hist[hist.length-1] : null;
+        const prev = last ? `Prev: R ${formatTime12(last.prevReceived||'') || '—'}, G ${formatTime12(last.prevGiven||'') || '—'} (reset ${formatTime12(last.resetAt||'') || ''})` : '';
         return `
-          <tr>
-            <td>${o.box}</td>
-            <td>${o.food} <span class=\"muted\">(x${o.pax})</span></td>
-            <td>${formatTime12(o.scheduledTime||'') || '—'}</td>
-            <td>${formatTime12(o.timeReceived||'') || '—'}</td>
-            <td>${formatTime12(o.timeGiven||'') || '—'}</td>
-            <td>${prevBits}</td>
-          </tr>`;
+          <div class=\"sum-item\" style=\"padding:10px 12px; border-bottom:1px solid #eee; display:flex; flex-direction:column; gap:6px;\">
+            <div style=\"display:flex; justify-content:space-between; align-items:center; gap:8px;\">
+              <div style=\"min-width:0;\"><strong>Box ${o.box}</strong> — ${o.food} <span class=\"muted\">(x${o.pax})</span></div>
+              <div style=\"white-space:nowrap;\">${tim}</div>
+            </div>
+            <div style=\"display:flex; gap:12px; flex-wrap:wrap; font-size:14px;\">
+              <div>Rec: ${rec}</div>
+              <div>Gvn: ${gvn}</div>
+            </div>
+            ${prev ? `<div class=\"muted\" style=\"font-size:12px;\">${prev}</div>` : ''}
+          </div>`;
       }).join('');
-      const html = `
-        <div class=\"small\">All items with current times and last reset info.</div>
-        <table style=\"width:100%; border-collapse:collapse;\">
-          <thead>
-            <tr>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Box</th>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Food</th>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Time</th>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Rec</th>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Gvn</th>
-              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">History</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>`;
+      const html = `<div style=\"max-height:60vh; overflow:auto; -webkit-overflow-scrolling:touch;\">${cards}</div>`;
       const container = document.getElementById('modalBody');
       container.innerHTML = html;
       document.getElementById('modalOverlay').style.display = 'flex';

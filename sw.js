@@ -22,6 +22,18 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  // Navigation fallback: always serve cached index.html when offline navigations occur
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).catch(async () => {
+        const indexUrl = new URL('./index.html', self.location);
+        const cached = await caches.match(indexUrl.pathname, { ignoreSearch: true }) || await caches.match(indexUrl.href, { ignoreSearch: true });
+        return cached || Response.error();
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(req, { ignoreSearch: true }).then((cached) => {
       if (cached) return cached;
@@ -40,4 +52,3 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
-
