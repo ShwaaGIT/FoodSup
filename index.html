@@ -162,6 +162,14 @@
   </style>
   <!-- Excel parser for reading example.xlsx when hosted -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    // Optional local fallback: place xlsx.full.min.js next to this file
+    if (typeof XLSX === 'undefined') {
+      var s = document.createElement('script');
+      s.src = 'xlsx.full.min.js';
+      document.head.appendChild(s);
+    }
+  </script>
 </head>
 <body>
 
@@ -227,6 +235,11 @@
 
   <!-- Bottom actions -->
   <div class="footer-actions" style="margin-top:16px;">
+    <label style="display:inline-flex; align-items:center; gap:8px; margin-right:8px;">
+      <span>Import Excel</span>
+      <input id="xlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel">
+    </label>
+    <button id="summaryBtn" type="button">Summary</button>
     <button id="resetAllBtn" type="button">Reset All</button>
   </div>
 
@@ -437,6 +450,10 @@
       });
       return list;
     }
+    function ensureHistory(list) {
+      list.forEach(o => { if (!Array.isArray(o.history)) o.history = []; });
+      return list;
+    }
 
     function buildInitialAttendance(list) {
       const map = {};
@@ -470,6 +487,19 @@
     function getCurrentTimeString() {
       const now = new Date();
       return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`; // 24h HH:MM
+    }
+
+    // Display helper: convert HH:MM (24h) to 12-hour with am/pm
+    function formatTime12(t) {
+      if (!t || typeof t !== 'string') return '';
+      const m = t.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+      if (!m) return t; // leave unexpected formats as-is
+      let h = parseInt(m[1], 10);
+      const min = m[2];
+      const ampm = h >= 12 ? 'pm' : 'am';
+      h = h % 12;
+      if (h === 0) h = 12;
+      return `${h}:${min} ${ampm}`;
     }
 
     function getStatus(order) {
@@ -515,10 +545,16 @@
       const order = orders[index];
       if (!order.timeReceived) {
         // First click: sent to chef
-        order.timeReceived = getCurrentTimeString();
+        const t = getCurrentTimeString();
+        order.timeReceived = t;
+        if (!Array.isArray(order.history)) order.history = [];
+        order.history.push({ type: 'received', value: t, ts: Date.now() });
       } else if (!order.timeGiven) {
         // Second click: served to customer
-        order.timeGiven = getCurrentTimeString();
+        const t = getCurrentTimeString();
+        order.timeGiven = t;
+        if (!Array.isArray(order.history)) order.history = [];
+        order.history.push({ type: 'given', value: t, ts: Date.now() });
       } else {
         // Optional: third click to reset (uncomment if you want that)
         // order.timeReceived = null;
@@ -601,15 +637,25 @@
     function editTime(index, field) {
       const order = orders[index];
       const current = order[field] || "";
-      let val = prompt("Enter time as HH:MM (or 'now' to use current time). Empty to clear.", current);
+      let val = prompt("Enter time (HH:MM or 12h like 2:05pm, or 'now'). Empty to clear.", current);
       if (val === null) return; // canceled
       val = String(val).trim();
       if (val.toLowerCase() === "now") {
-        order[field] = getCurrentTimeString();
+        const prev = order[field] || null;
+        const t = getCurrentTimeString();
+        order[field] = t;
+        if (!Array.isArray(order.history)) order.history = [];
+        order.history.push({ type: 'edit', field, from: prev, to: t, ts: Date.now() });
       } else if (val === "") {
+        const prev = order[field] || null;
         order[field] = null;
+        if (!Array.isArray(order.history)) order.history = [];
+        order.history.push({ type: 'edit', field, from: prev, to: null, ts: Date.now() });
       } else if (isValidTime(val)) {
+        const prev = order[field] || null;
         order[field] = val;
+        if (!Array.isArray(order.history)) order.history = [];
+        order.history.push({ type: 'edit', field, from: prev, to: val, ts: Date.now() });
       } else {
         alert("Invalid time. Please use HH:MM in 24-hour format, e.g. 09:30 or 17:05.");
         return;
@@ -619,8 +665,11 @@
     }
 
     function resetRow(index) {
-      orders[index].timeReceived = null;
-      orders[index].timeGiven = null;
+      const o = orders[index];
+      if (!Array.isArray(o.history)) o.history = [];
+      o.history.push({ type: 'reset', prevReceived: o.timeReceived || null, prevGiven: o.timeGiven || null, resetAt: getCurrentTimeString(), ts: Date.now() });
+      o.timeReceived = null;
+      o.timeGiven = null;
       saveToLocal();
       renderTable();
     }
@@ -632,6 +681,7 @@
       orderUidCounter = 1; // restart ID counter
       ensureOrderIds(orders);
       ensureBaselines(orders);
+      ensureHistory(orders);
       attendance = buildInitialAttendance(orders);
       saveToLocal();
       renderAll();
@@ -716,6 +766,24 @@
     }
 
     // Auto-load example.xlsx if present (first sheet): columns Box, Food, Pax, Scheduled Time
+    function excelToTimeString(val) {
+      if (val == null || val === '') return '';
+      if (val instanceof Date) {
+        const h = val.getHours();
+        const m = val.getMinutes();
+        return `${pad2(h)}:${pad2(m)}`;
+      }
+      if (typeof val === 'number' && isFinite(val)) {
+        const frac = ((val % 1) + 1) % 1; // ensure positive fraction
+        const totalMin = Math.round(frac * 24 * 60);
+        const h = Math.floor(totalMin / 60) % 24;
+        const m = totalMin % 60;
+        return `${pad2(h)}:${pad2(m)}`;
+      }
+      // strings or others
+      return normalizeTimeString(String(val));
+    }
+
     async function tryLoadXlsx() {
       try {
         if (typeof XLSX === 'undefined') return null;
@@ -726,7 +794,7 @@
         const sheetName = wb.SheetNames[0];
         if (!sheetName) return null;
         const ws = wb.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, cellDates: true });
         if (!rows || rows.length === 0) return null;
 
         const header = rows[0].map(h => String(h).trim().toLowerCase());
@@ -749,7 +817,7 @@
           const box = Number(String(boxVal || '').replace(/[^0-9]/g, ''));
           const food = String(foodVal || '').trim();
           const pax = Number(paxVal) || 1;
-          const time = normalizeTimeString(String(timeRaw || ''));
+          const time = excelToTimeString(timeRaw);
           if (!box || !food) return;
           list.push({
             box,
@@ -782,26 +850,29 @@
           }
         };
 
-        const scheduled = order.scheduledTime || "";
-        const received = order.timeReceived || "";
-        const given = order.timeGiven || "";
+        const scheduledRaw = order.scheduledTime || "";
+        const receivedRaw = order.timeReceived || "";
+        const givenRaw = order.timeGiven || "";
+        const scheduled = formatTime12(scheduledRaw) || "";
+        const received = formatTime12(receivedRaw) || "";
+        const given = formatTime12(givenRaw) || "";
 
         tr.innerHTML = `
           <td>${order.box}</td>
           <td>${order.food} <span class="pax-inline muted">(x${order.pax})</span></td>
           <td>
             <div class="time-cell">
-              <span class="lp ${scheduled ? '' : 'muted'}" data-field="scheduledTime" data-index="${index}" title="Long-press to edit">${scheduled || '—'}</span>
+              <span class="lp ${scheduledRaw ? '' : 'muted'}" data-field="scheduledTime" data-index="${index}" title="Long-press to edit">${scheduled || '—'}</span>
             </div>
           </td>
           <td>
             <div class="time-cell">
-              <span class="lp ${received ? '' : 'muted'}" data-field="timeReceived" data-index="${index}" title="Long-press to edit">${received || '—'}</span>
+              <span class="lp ${receivedRaw ? '' : 'muted'}" data-field="timeReceived" data-index="${index}" title="Long-press to edit">${received || '—'}</span>
             </div>
           </td>
           <td>
             <div class="time-cell">
-              <span class="lp ${given ? '' : 'muted'}" data-field="timeGiven" data-index="${index}" title="Long-press to edit">${given || '—'}</span>
+              <span class="lp ${givenRaw ? '' : 'muted'}" data-field="timeGiven" data-index="${index}" title="Long-press to edit">${given || '—'}</span>
             </div>
           </td>
           <td>
@@ -900,7 +971,20 @@
     function openArrivalEditor(box) {
       currentModalBox = box;
       setModalUI('arrival', `Confirm Arrival & Check Times — Box ${box}`, true, 'Cancel');
-      const items = orders.filter(o => o.box === box).slice().sort((a,b)=>{
+      const arrived = attendance[box] && attendance[box].arrived;
+      const items = orders.filter(o => o.box === box).slice();
+      const toMinutes = (t) => {
+        if (!t || !isValidTime(t)) return Infinity;
+        const [hh, mm] = t.split(':').map(n => parseInt(n, 10));
+        return (hh * 60) + mm;
+      };
+      // Sort by time (earliest first); blanks last; fallback by name then pax
+      items.sort((a,b) => {
+        const ta = arrived ? (a.scheduledTime || '') : (a.baselineScheduledTime || a.scheduledTime || '');
+        const tb = arrived ? (b.scheduledTime || '') : (b.baselineScheduledTime || b.scheduledTime || '');
+        const ma = toMinutes(ta);
+        const mb = toMinutes(tb);
+        if (ma !== mb) return ma - mb;
         const fa = (a.food||'').toLowerCase();
         const fb = (b.food||'').toLowerCase();
         if (fa !== fb) return fa < fb ? -1 : 1;
@@ -908,7 +992,6 @@
       });
       const container = document.getElementById('modalBody');
       // Build simple editor list
-      const arrived = attendance[box] && attendance[box].arrived;
       const lines = items.map((o) => {
         const defaultTime = arrived ? (o.scheduledTime || '') : (o.baselineScheduledTime || o.scheduledTime || '');
         return `
@@ -926,7 +1009,19 @@
     function openEditTimes(box) {
       currentModalBox = box;
       setModalUI('edit', `Edit Times — Box ${box}`, true, 'Cancel');
-      const items = orders.filter(o => o.box === box).slice().sort((a,b)=>{
+      const items = orders.filter(o => o.box === box).slice();
+      const toMinutes = (t) => {
+        if (!t || !isValidTime(t)) return Infinity;
+        const [hh, mm] = t.split(':').map(n => parseInt(n, 10));
+        return (hh * 60) + mm;
+      };
+      // Sort by current scheduledTime (earliest first); blanks last
+      items.sort((a,b) => {
+        const ta = a.scheduledTime || '';
+        const tb = b.scheduledTime || '';
+        const ma = toMinutes(ta);
+        const mb = toMinutes(tb);
+        if (ma !== mb) return ma - mb;
         const fa = (a.food||'').toLowerCase();
         const fb = (b.food||'').toLowerCase();
         if (fa !== fb) return fa < fb ? -1 : 1;
@@ -1007,6 +1102,130 @@
     document.getElementById('modalCancelBtn').addEventListener('click', () => closeModal());
     document.getElementById('modalSaveBtn').addEventListener('click', () => saveArrivalEdits());
 
+    // Import Excel (.xlsx/.xls) from local file
+    async function importXlsxFromFile(file) {
+      try {
+        if (!file) return;
+        if (typeof XLSX === 'undefined') {
+          alert('Excel importer not available.');
+          return;
+        }
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) throw new Error('No sheets found');
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, cellDates: true });
+        if (!rows || rows.length === 0) throw new Error('Empty sheet');
+
+        const header = rows[0].map(h => String(h).trim().toLowerCase());
+        const findIdx = (cands) => cands.map(n => header.indexOf(n)).find(i => i >= 0);
+        const idx = {
+          box: findIdx(['box', 'box #', 'box no', 'box number']),
+          food: findIdx(['food', 'item', 'menu']),
+          pax: findIdx(['pax', 'qty', 'quantity', 'count']),
+          scheduledTime: findIdx(['scheduled time', 'time', 'scheduled', 'serve at', 'serve time'])
+        };
+
+        const dataRows = rows.slice(1).filter(r => r && r.some(cell => String(cell).trim() !== ''));
+        const list = [];
+        dataRows.forEach((r) => {
+          const boxVal = idx.box != null ? r[idx.box] : r[0];
+          const foodVal = idx.food != null ? r[idx.food] : r[1];
+          const paxVal = idx.pax != null ? r[idx.pax] : r[2];
+          const timeRaw = idx.scheduledTime != null ? r[idx.scheduledTime] : r[3];
+
+          const box = Number(String(boxVal || '').replace(/[^0-9]/g, ''));
+          const food = String(foodVal || '').trim();
+          const pax = Number(paxVal) || 1;
+          const time = excelToTimeString(timeRaw);
+          if (!box || !food) return;
+          list.push({
+            box,
+            food,
+            pax,
+            scheduledTime: isValidTime(time) ? time : '',
+            baselineScheduledTime: isValidTime(time) ? time : '',
+            timeReceived: null,
+            timeGiven: null
+          });
+        });
+
+        if (!list.length) throw new Error('No valid rows');
+
+        // Load into app state
+        orders = list.map((o, i) => ({ ...o, _seq: i }));
+        ensureOrderIds(orders);
+        ensureBaselines(orders);
+        ensureHistory(orders);
+        templateOrders = list.slice();
+        attendance = buildInitialAttendance(orders);
+        saveToLocal();
+        renderAll();
+        setActiveTab('attendance');
+        alert(`Imported ${orders.length} items from ${file.name}`);
+        // Clear input for re-uploading same file if needed
+        const input = document.getElementById('xlsxInput');
+        if (input) input.value = '';
+      } catch (e) {
+        console.warn('Import failed', e);
+        alert('Failed to import Excel: ' + (e && e.message ? e.message : 'Unknown error'));
+      }
+    }
+
+    const xlsxInputEl = document.getElementById('xlsxInput');
+    if (xlsxInputEl) {
+      xlsxInputEl.addEventListener('change', (ev) => {
+        const f = ev.target.files && ev.target.files[0];
+        if (f) importXlsxFromFile(f);
+      });
+    }
+
+    // Summary modal: list all items with current times and most recent reset info
+    function openSummary() {
+      setModalUI('summary', 'Summary', false, 'Close');
+      const items = orders.slice().sort((a,b)=>{
+        const sa = (a._seq ?? 0);
+        const sb = (b._seq ?? 0);
+        if (sa !== sb) return sa - sb;
+        return 0;
+      });
+      const rows = items.map(o => {
+        const hist = Array.isArray(o.history) ? o.history.filter(h => h.type === 'reset') : [];
+        const lastReset = hist.length ? hist[hist.length - 1] : null;
+        const prevBits = lastReset ? `Prev: R ${formatTime12(lastReset.prevReceived||'') || '—'}, G ${formatTime12(lastReset.prevGiven||'') || '—'} (reset ${formatTime12(lastReset.resetAt||'') || ''})` : '';
+        return `
+          <tr>
+            <td>${o.box}</td>
+            <td>${o.food} <span class=\"muted\">(x${o.pax})</span></td>
+            <td>${formatTime12(o.scheduledTime||'') || '—'}</td>
+            <td>${formatTime12(o.timeReceived||'') || '—'}</td>
+            <td>${formatTime12(o.timeGiven||'') || '—'}</td>
+            <td>${prevBits}</td>
+          </tr>`;
+      }).join('');
+      const html = `
+        <div class=\"small\">All items with current times and last reset info.</div>
+        <table style=\"width:100%; border-collapse:collapse;\">
+          <thead>
+            <tr>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Box</th>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Food</th>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Time</th>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Rec</th>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">Gvn</th>
+              <th style=\"text-align:left; border-bottom:1px solid #ddd;\">History</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      const container = document.getElementById('modalBody');
+      container.innerHTML = html;
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+    const summaryBtn = document.getElementById('summaryBtn');
+    if (summaryBtn) summaryBtn.addEventListener('click', openSummary);
+
     // Bootstrap state: localStorage > example.xlsx > default data
     (async function init() {
       const saved = loadFromLocal();
@@ -1033,6 +1252,7 @@
       orders = initialOrders.map((o, i) => ({ ...o, _seq: i, baselineScheduledTime: (o.baselineScheduledTime != null ? o.baselineScheduledTime : (o.scheduledTime || '')) }));
       ensureOrderIds(orders);
       ensureBaselines(orders);
+      ensureHistory(orders);
       renderAll();
       setActiveTab('attendance');
     })();
