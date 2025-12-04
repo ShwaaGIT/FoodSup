@@ -182,6 +182,12 @@
   </nav>
   <!-- Top toolbar removed per request -->
 
+  <!-- Floating sort toggle (bottom-right, always visible) -->
+  <button id="sortToggleFab" type="button" title="Toggle sort (Original ↔ Food→Time)"
+          style="position:fixed; right:12px; bottom:12px; z-index:110; border-radius:999px; padding:10px 12px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+    🔀 Sort
+  </button>
+
   <section id="attendanceView" style="display:none;">
     <table id="attendanceTable">
       <thead>
@@ -475,12 +481,23 @@
       return h * 60 + m;
     }
 
+    // Sort mode: 'original' (by import), or 'foodtime' (group by food, then scheduled time)
+    const sortModeKey = 'gabbaSortMode';
+    let sortMode = (localStorage.getItem(sortModeKey) || 'original');
+
     function sortOrders() {
       orders.sort((a, b) => {
-        const ta = timeToMinutes(a.scheduledTime);
-        const tb = timeToMinutes(b.scheduledTime);
+        // "original" mode = strict Excel import order only
+        if (sortMode === 'original') {
+          return (a._seq ?? 0) - (b._seq ?? 0);
+        }
+        // "foodtime" mode = by Scheduled Time, then group by Food (alphabetical), then original order
+        const ta = timeToMinutes(a.scheduledTime || '');
+        const tb = timeToMinutes(b.scheduledTime || '');
         if (ta !== tb) return ta - tb;
-        // stable-ish tie-breaker: preserve input order via _seq
+        const fa = String(a.food || '').toLowerCase();
+        const fb = String(b.food || '').toLowerCase();
+        if (fa !== fb) return fa < fb ? -1 : 1;
         return (a._seq ?? 0) - (b._seq ?? 0);
       });
     }
@@ -509,6 +526,12 @@
       if (order.timeReceived && !order.timeGiven) return "sent";
       if (order.timeReceived && order.timeGiven) return "served";
       return "waiting";
+    }
+
+    function setSortMode(mode) {
+      sortMode = mode;
+      try { localStorage.setItem(sortModeKey, sortMode); } catch (e) {}
+      renderOrdersTable();
     }
 
     function saveToLocal() {
@@ -1113,6 +1136,16 @@
     document.getElementById('tabOnDay').addEventListener('click', () => setActiveTab('onDay'));
     document.getElementById('modalCancelBtn').addEventListener('click', () => closeModal());
     document.getElementById('modalSaveBtn').addEventListener('click', () => saveArrivalEdits());
+    // Sort FAB toggle: Original ↔ Food→Time
+    (function(){
+      const fab = document.getElementById('sortToggleFab');
+      if (fab) {
+        fab.addEventListener('click', () => {
+          const next = (sortMode === 'original') ? 'foodtime' : 'original';
+          setSortMode(next);
+        });
+      }
+    })();
     // Click outside modal content to close Summary quickly
     (function(){
       const overlay = document.getElementById('modalOverlay');
