@@ -864,17 +864,17 @@
           <td>${order.food} <span class="pax-inline muted">(x${order.pax})</span></td>
           <td>
             <div class="time-cell">
-              <span class="lp ${scheduledRaw ? '' : 'muted'}" data-field="scheduledTime" data-index="${index}" title="Long-press to edit">${scheduled || '—'}</span>
+              <span class="${scheduledRaw ? '' : 'muted'}">${scheduled || '—'}</span>
             </div>
           </td>
           <td>
             <div class="time-cell">
-              <span class="lp ${receivedRaw ? '' : 'muted'}" data-field="timeReceived" data-index="${index}" title="Long-press to edit">${received || '—'}</span>
+              <span class="${receivedRaw ? '' : 'muted'}">${received || '—'}</span>
             </div>
           </td>
           <td>
             <div class="time-cell">
-              <span class="lp ${givenRaw ? '' : 'muted'}" data-field="timeGiven" data-index="${index}" title="Long-press to edit">${given || '—'}</span>
+              <span class="${givenRaw ? '' : 'muted'}">${given || '—'}</span>
             </div>
           </td>
           <td>
@@ -882,13 +882,7 @@
           </td>
         `;
 
-        // Attach long-press handlers to time spans for in-place edits
-        const lps = tr.querySelectorAll('.lp');
-        lps.forEach(sp => {
-          const idx = Number(sp.getAttribute('data-index'));
-          const field = sp.getAttribute('data-field');
-          attachLongPress(sp, () => editTime(idx, field));
-        });
+        // No long-press editing on time cells
         tbody.appendChild(tr);
       });
     }
@@ -1053,9 +1047,13 @@
       const changed = items.filter(o => (o.scheduledTime || '') !== (o.baselineScheduledTime || ''))
                            .sort((a,b)=> (a.food||'').localeCompare(b.food||''));
       const container = document.getElementById('modalBody');
+      const unconfirmBtn = `<button type="button" onclick="unconfirmBox(${box});">Unconfirm</button>`;
       if (!changed.length) {
         container.innerHTML = `<div>No time changes for this box.</div>
-          <div style="margin-top:10px;"><button type="button" onclick="openEditTimes(${box});">Add Edits</button></div>`;
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button type="button" onclick="openEditTimes(${box});">Add Edits</button>
+            ${unconfirmBtn}
+          </div>`;
       } else {
         const rows = changed.map(o => `
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
@@ -1063,7 +1061,7 @@
             <div style="white-space:nowrap;">${fmtTime(o.baselineScheduledTime)} → <strong>${fmtTime(o.scheduledTime)}</strong></div>
           </div>
         `).join('');
-        container.innerHTML = rows + `<div style=\"margin-top:10px;\"><button type=\"button\" onclick=\"openEditTimes(${box});\">Add Edits</button></div>`;
+        container.innerHTML = rows + `<div style=\"margin-top:10px; display:flex; gap:8px;\"><button type=\"button\" onclick=\"openEditTimes(${box});\">Add Edits</button>${unconfirmBtn}</div>`;
       }
       document.getElementById('modalOverlay').style.display = 'flex';
     }
@@ -1072,6 +1070,16 @@
       document.getElementById('modalOverlay').style.display = 'none';
       currentModalBox = null;
       currentModalMode = null;
+    }
+
+    function unconfirmBox(box) {
+      const rec = attendance[box] || { arrived: false, arrivedAt: null };
+      rec.arrived = false;
+      rec.arrivedAt = null;
+      attendance[box] = rec;
+      saveToLocal();
+      closeModal();
+      renderAll();
     }
 
     function saveArrivalEdits() {
@@ -1194,7 +1202,56 @@
       });
     }
 
-    // Summary modal: list all items with current times and most recent reset info
+    function buildSummaryRows() {
+      const items = orders.slice().sort((a,b)=>{
+        const sa = (a._seq ?? 0);
+        const sb = (b._seq ?? 0);
+        if (sa !== sb) return sa - sb;
+        return 0;
+      });
+      const rows = items.map(o => {
+        const resets = Array.isArray(o.history) ? o.history.filter(h=>h.type==='reset') : [];
+        const last = resets.length ? resets[resets.length-1] : null;
+        return [
+          o.box,
+          o.food,
+          o.pax,
+          o.scheduledTime || '',
+          o.timeReceived || '',
+          o.timeGiven || '',
+          last ? (last.prevReceived || '') : '',
+          last ? (last.prevGiven || '') : '',
+          last ? (last.resetAt || '') : ''
+        ];
+      });
+      return rows;
+    }
+
+    function downloadSummaryXlsx() {
+      try {
+        if (typeof XLSX === 'undefined') {
+          alert('Excel exporter not available.');
+          return;
+        }
+        const header = [
+          'Box','Food','Pax','Scheduled Time','Time Received','Time Given','Prev Received (last reset)','Prev Given (last reset)','Reset At (last reset)'
+        ];
+        const body = buildSummaryRows();
+        const aoa = [header, ...body];
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Summary');
+        const fname = `gabba_summary_${new Date().toISOString().slice(0,10)}.xlsx`;
+        XLSX.writeFile(wb, fname);
+      } catch (e) {
+        console.warn('Summary export failed', e);
+        alert('Failed to create Excel summary: ' + (e && e.message ? e.message : 'Unknown error'));
+      }
+    }
+
+    // Download button is shown inside the Summary modal
+
+    // Summary modal: table like Orders + extra info, with Download button
     function openSummary() {
       setModalUI('summary', 'Summary', false, 'Close');
       const items = orders.slice().sort((a,b)=>{
@@ -1203,27 +1260,43 @@
         if (sa !== sb) return sa - sb;
         return 0;
       });
-      const cards = items.map(o => {
+      const rows = items.map(o => {
         const rec = formatTime12(o.timeReceived||'') || '—';
         const gvn = formatTime12(o.timeGiven||'') || '—';
         const tim = formatTime12(o.scheduledTime||'') || '—';
-        const hist = Array.isArray(o.history) ? o.history.filter(h=>h.type==='reset') : [];
-        const last = hist.length ? hist[hist.length-1] : null;
-        const prev = last ? `Prev: R ${formatTime12(last.prevReceived||'') || '—'}, G ${formatTime12(last.prevGiven||'') || '—'} (reset ${formatTime12(last.resetAt||'') || ''})` : '';
+        const resets = Array.isArray(o.history) ? o.history.filter(h=>h.type==='reset') : [];
+        const last = resets.length ? resets[resets.length-1] : null;
+        const prev = last ? `R ${formatTime12(last.prevReceived||'') || '—'}, G ${formatTime12(last.prevGiven||'') || '—'} (reset ${formatTime12(last.resetAt||'') || ''})` : '';
         return `
-          <div class=\"sum-item\" style=\"padding:10px 12px; border-bottom:1px solid #eee; display:flex; flex-direction:column; gap:6px;\">
-            <div style=\"display:flex; justify-content:space-between; align-items:center; gap:8px;\">
-              <div style=\"min-width:0;\"><strong>Box ${o.box}</strong> — ${o.food} <span class=\"muted\">(x${o.pax})</span></div>
-              <div style=\"white-space:nowrap;\">${tim}</div>
-            </div>
-            <div style=\"display:flex; gap:12px; flex-wrap:wrap; font-size:14px;\">
-              <div>Rec: ${rec}</div>
-              <div>Gvn: ${gvn}</div>
-            </div>
-            ${prev ? `<div class=\"muted\" style=\"font-size:12px;\">${prev}</div>` : ''}
-          </div>`;
+          <tr>
+            <td>${o.box}</td>
+            <td>${o.food} <span class=\"muted\">(x${o.pax})</span></td>
+            <td>${tim}</td>
+            <td>${rec}</td>
+            <td>${gvn}</td>
+            <td>${prev}</td>
+          </tr>`;
       }).join('');
-      const html = `<div style=\"max-height:60vh; overflow:auto; -webkit-overflow-scrolling:touch;\">${cards}</div>`;
+      const html = `
+        <div style=\"display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;\">
+          <div class=\"small muted\">Summary of items</div>
+          <button type=\"button\" onclick=\"downloadSummaryXlsx()\">Download</button>
+        </div>
+        <div style=\"max-height:60vh; overflow:auto; -webkit-overflow-scrolling:touch;\">
+          <table style=\"width:100%; border-collapse:collapse; table-layout:fixed;\"> 
+            <thead>
+              <tr>
+                <th>Box</th>
+                <th>Food</th>
+                <th>Time</th>
+                <th>Rec</th>
+                <th>Gvn</th>
+                <th>Prev</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
       const container = document.getElementById('modalBody');
       container.innerHTML = html;
       document.getElementById('modalOverlay').style.display = 'flex';
