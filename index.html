@@ -149,8 +149,8 @@
       #ordersTable { table-layout: fixed; }
       #ordersTable th, #ordersTable td { padding: 6px 4px; font-size: 16px; }
       .icon-btn { padding: 4px 6px; min-height: 28px; min-width: 28px; font-size: 16px; }
-      /* 1: Box */
-      #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) { width: 32px; white-space: nowrap; }
+      /* 1: Box (+small pax) */
+      #ordersTable th:nth-child(1), #ordersTable td:nth-child(1) { width: 64px; white-space: nowrap; }
       /* 2: Food (truncate) */
       #ordersTable th:nth-child(2), #ordersTable td:nth-child(2) { width: 100px; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       /* 3: Scheduled Time */
@@ -490,17 +490,32 @@
 
     function sortOrders() {
       orders.sort((a, b) => {
-        // original = pure import order, with no special handling for declined
+        // original = pure import order
         if (sortMode === 'original') {
           return (a._seq ?? 0) - (b._seq ?? 0);
         }
-        // "foodtime" mode = by Scheduled Time, then group by Food (alphabetical), then original order
+        // foodtime = time → food → dietaries-first → pax preference (8,12, then 10) → import order
         const ta = timeToMinutes(a.scheduledTime || '');
         const tb = timeToMinutes(b.scheduledTime || '');
         if (ta !== tb) return ta - tb;
         const fa = String(a.food || '').toLowerCase();
         const fb = String(b.food || '').toLowerCase();
         if (fa !== fb) return fa < fb ? -1 : 1;
+        // Dietaries first within the same time+food group
+        const dietW = (o) => (o.dietaryType && String(o.dietaryType).trim() ? 0 : 1);
+        const wda = dietW(a);
+        const wdb = dietW(b);
+        if (wda !== wdb) return wda - wdb;
+        // Pax preference: 8, then 12, then 10, then others numeric
+        const paxW = (n) => (n === 8 ? 0 : n === 12 ? 1 : n === 10 ? 2 : 3);
+        const wa = paxW(Number(a.pax));
+        const wb = paxW(Number(b.pax));
+        if (wa !== wb) return wa - wb;
+        if (wa === 3 && wb === 3) {
+          const na = Number(a.pax) || 0;
+          const nb = Number(b.pax) || 0;
+          if (na !== nb) return na - nb;
+        }
         return (a._seq ?? 0) - (b._seq ?? 0);
       });
     }
@@ -726,6 +741,10 @@
     function declineRow(index) {
       const o = orders[index];
       o.declined = !o.declined; // toggle decline
+      if (!Array.isArray(o.history)) o.history = [];
+      const now = getCurrentTimeString();
+      o.history.push({ type: 'decline', to: o.declined, at: now, ts: Date.now() });
+      if (o.declined) o.lastDeclinedAt = now;
       saveToLocal();
       renderTable();
     }
@@ -917,8 +936,8 @@
         const declineTitle = isDeclined ? 'Undo Don\'t Want' : 'Don\'t Want';
 
         tr.innerHTML = `
-          <td>${order.box}</td>
-          <td>${order.food} <span class="pax-inline muted">(x${order.pax})</span></td>
+          <td>${order.box} <span class="muted" style="font-size:12px;">(PAX x${order.pax})</span></td>
+          <td>${order.food}</td>
           <td>
             <div class="time-cell">
               <span class="${scheduledRaw ? '' : 'muted'}">${scheduled || '—'}</span>
@@ -988,7 +1007,7 @@
         row.innerHTML = `
           <td>${box}</td>
           <td>${att.arrived ? 'Here' : 'Not here'}</td>
-          <td>${att.arrivedAt || ''}</td>
+          <td>${formatTime12(att.arrivedAt || '') || ''}</td>
           <td>
             ${att.arrived
               ? `<button type="button" onclick="openViewChanges(${box}); event.stopPropagation();">Times</button>`
@@ -1047,7 +1066,12 @@
       document.getElementById('modalCancelBtn').style.display = '';
     }
 
-    function fmtTime(t) { return t && t.trim() ? t : '—'; }
+    function fmtTime(t) {
+      if (!t || !String(t).trim()) return '—';
+      // normalize to HH:MM then format to 12h
+      const norm = normalizeTimeString(String(t));
+      return formatTime12(norm) || '—';
+    }
     function openArrivalEditor(box) {
       currentModalBox = box;
       setModalUI('arrival', `Box ${box}`, true, 'Cancel');
@@ -1334,6 +1358,8 @@
           o.scheduledTime || '',
           o.timeReceived || '',
           o.timeGiven || '',
+          o.declined ? 'Yes' : '',
+          o.lastDeclinedAt || '',
           last ? (last.prevReceived || '') : '',
           last ? (last.prevGiven || '') : '',
           last ? (last.resetAt || '') : ''
@@ -1349,7 +1375,7 @@
           return;
         }
         const header = [
-          'Box','Food','Pax','Scheduled Time','Time Received','Time Given','Prev Received (last reset)','Prev Given (last reset)','Reset At (last reset)'
+          'Box','Food','Pax','Scheduled Time','Time Received','Time Given','Declined','Declined At','Prev Received (last reset)','Prev Given (last reset)','Reset At (last reset)'
         ];
         const body = buildSummaryRows();
         const aoa = [header, ...body];
@@ -1381,6 +1407,8 @@
         const rec = formatTime12(o.timeReceived||'') || '—';
         const gvn = formatTime12(o.timeGiven||'') || '—';
         const tim = formatTime12(o.scheduledTime||'') || '—';
+        const decl = o.declined ? 'Yes' : '';
+        const declAt = o.lastDeclinedAt ? (formatTime12(o.lastDeclinedAt) || '') : '';
         const resets = Array.isArray(o.history) ? o.history.filter(h=>h.type==='reset') : [];
         const last = resets.length ? resets[resets.length-1] : null;
         const prev = last ? `R ${formatTime12(last.prevReceived||'') || '—'}, G ${formatTime12(last.prevGiven||'') || '—'} (reset ${formatTime12(last.resetAt||'') || ''})` : '';
@@ -1391,6 +1419,8 @@
             <td>${tim}</td>
             <td>${rec}</td>
             <td>${gvn}</td>
+            <td>${decl}</td>
+            <td>${declAt}</td>
             <td>${prev}</td>
           </tr>`;
       }).join('');
@@ -1408,6 +1438,8 @@
                 <th>Time</th>
                 <th>Rec</th>
                 <th>Gvn</th>
+                <th>Declined</th>
+                <th>Declined At</th>
                 <th>Prev</th>
               </tr>
             </thead>
@@ -1513,7 +1545,7 @@
           <td>${o.box}</td>
           <td>${o.food}</td>
           <td>${o.pax}</td>
-          <td>${o.scheduledTime || ''}</td>
+          <td>${formatTime12(o.scheduledTime || '') || ''}</td>
         `;
         tbody.appendChild(tr);
 
