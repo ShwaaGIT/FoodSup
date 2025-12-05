@@ -494,19 +494,20 @@
         if (sortMode === 'original') {
           return (a._seq ?? 0) - (b._seq ?? 0);
         }
-        // foodtime = time → food → dietaries-first → pax preference (8,12, then 10) → import order
+        // foodtime = time → dietaries-first → food → pax preference (8,12, then 10) → import order
         const ta = timeToMinutes(a.scheduledTime || '');
         const tb = timeToMinutes(b.scheduledTime || '');
         if (ta !== tb) return ta - tb;
-        const fa = String(a.food || '').toLowerCase();
-        const fb = String(b.food || '').toLowerCase();
-        if (fa !== fb) return fa < fb ? -1 : 1;
-        // Dietaries first within the same time+food group
+        // Dietaries first within the same time slot (regardless of food)
         const dietW = (o) => (o.dietaryType && String(o.dietaryType).trim() ? 0 : 1);
         const wda = dietW(a);
         const wdb = dietW(b);
         if (wda !== wdb) return wda - wdb;
-        // Pax preference: 8, then 12, then 10, then others numeric
+        // Then group foods alphabetically
+        const fa = String(a.food || '').toLowerCase();
+        const fb = String(b.food || '').toLowerCase();
+        if (fa !== fb) return fa < fb ? -1 : 1;
+        // Then pax priority
         const paxW = (n) => (n === 8 ? 0 : n === 12 ? 1 : n === 10 ? 2 : 3);
         const wa = paxW(Number(a.pax));
         const wb = paxW(Number(b.pax));
