@@ -39,6 +39,9 @@
     tr.status-served {
       background: #c8f7c5; /* light green */
     }
+    tr.declined {
+      opacity: 0.6;
+    }
     button {
       padding: 12px 14px;
       font-size: 18px;
@@ -156,8 +159,8 @@
       #ordersTable th:nth-child(4), #ordersTable td:nth-child(4) { width: 56px; white-space: nowrap; }
       /* 5: Time Given */
       #ordersTable th:nth-child(5), #ordersTable td:nth-child(5) { width: 56px; white-space: nowrap; }
-      /* 6: Reset */
-      #ordersTable th:nth-child(6), #ordersTable td:nth-child(6) { width: 40px; white-space: nowrap; text-align: center; }
+      /* 6: Actions (Reset/Decline) */
+      #ordersTable th:nth-child(6), #ordersTable td:nth-child(6) { width: 76px; white-space: nowrap; text-align: center; }
     }
   </style>
   <!-- Excel parser for reading example.xlsx when hosted -->
@@ -487,7 +490,7 @@
 
     function sortOrders() {
       orders.sort((a, b) => {
-        // "original" mode = strict Excel import order only
+        // original = pure import order, with no special handling for declined
         if (sortMode === 'original') {
           return (a._seq ?? 0) - (b._seq ?? 0);
         }
@@ -526,6 +529,13 @@
       if (order.timeReceived && !order.timeGiven) return "sent";
       if (order.timeReceived && order.timeGiven) return "served";
       return "waiting";
+    }
+
+    function getDietaryStatus(order) {
+      if (!order.dietaryReceived && !order.dietaryGiven) return 'waiting';
+      if (order.dietaryReceived && !order.dietaryGiven) return 'sent';
+      if (order.dietaryReceived && order.dietaryGiven) return 'served';
+      return 'waiting';
     }
 
     function setSortMode(mode) {
@@ -584,6 +594,18 @@
         // Optional: third click to reset (uncomment if you want that)
         // order.timeReceived = null;
         // order.timeGiven = null;
+      }
+      saveToLocal();
+      renderTable();
+    }
+
+    function onDietaryClick(index) {
+      const order = orders[index];
+      if (!order) return;
+      if (!order.dietaryReceived) {
+        order.dietaryReceived = getCurrentTimeString();
+      } else if (!order.dietaryGiven) {
+        order.dietaryGiven = getCurrentTimeString();
       }
       saveToLocal();
       renderTable();
@@ -695,6 +717,15 @@
       o.history.push({ type: 'reset', prevReceived: o.timeReceived || null, prevGiven: o.timeGiven || null, resetAt: getCurrentTimeString(), ts: Date.now() });
       o.timeReceived = null;
       o.timeGiven = null;
+      o.dietaryReceived = null;
+      o.dietaryGiven = null;
+      saveToLocal();
+      renderTable();
+    }
+
+    function declineRow(index) {
+      const o = orders[index];
+      o.declined = !o.declined; // toggle decline
       saveToLocal();
       renderTable();
     }
@@ -867,7 +898,7 @@
       orders.forEach((order, index) => {
         if (!attendance[order.box] || !attendance[order.box].arrived) return; // only show arrived boxes
         const tr = document.createElement("tr");
-        tr.className = "status-" + getStatus(order);
+        tr.className = "status-" + getStatus(order) + (order.declined ? ' declined' : '');
 
         tr.onclick = (e) => {
           if (e.target.tagName.toLowerCase() !== "button") {
@@ -881,6 +912,9 @@
         const scheduled = formatTime12(scheduledRaw) || "";
         const received = formatTime12(receivedRaw) || "";
         const given = formatTime12(givenRaw) || "";
+        const isDeclined = !!order.declined;
+        const declineIcon = isDeclined ? '↩️' : '🚫';
+        const declineTitle = isDeclined ? 'Undo Don\'t Want' : 'Don\'t Want';
 
         tr.innerHTML = `
           <td>${order.box}</td>
@@ -902,11 +936,36 @@
           </td>
           <td>
             <button class="icon-btn" type="button" onclick="resetRow(${index}); event.stopPropagation();" aria-label="Reset" title="Reset">↺</button>
+            <button class="icon-btn" type="button" onclick="declineRow(${index}); event.stopPropagation();" aria-label="Decline" title="${declineTitle}">${declineIcon}</button>
           </td>
         `;
 
         // No long-press editing on time cells
         tbody.appendChild(tr);
+
+        // Extra dietary confirmation row per item if applicable
+        if (order.dietaryType) {
+          const dtr = document.createElement('tr');
+          dtr.className = 'status-' + getDietaryStatus(order) + (order.declined ? ' declined' : '') + ' dietary-row';
+          const dRecRaw = order.dietaryReceived || '';
+          const dGvnRaw = order.dietaryGiven || '';
+          const dRec = formatTime12(dRecRaw) || '';
+          const dGvn = formatTime12(dGvnRaw) || '';
+          dtr.onclick = (e) => {
+            if (e.target.tagName.toLowerCase() !== 'button') {
+              onDietaryClick(index);
+            }
+          };
+          dtr.innerHTML = `
+            <td>${order.box}</td>
+            <td><span class="muted">Dietary:</span> ${order.dietaryType}</td>
+            <td>—</td>
+            <td><span class="${dRecRaw ? '' : 'muted'}">${dRec || '—'}</span></td>
+            <td><span class="${dGvnRaw ? '' : 'muted'}">${dGvn || '—'}</span></td>
+            <td></td>
+          `;
+          tbody.appendChild(dtr);
+        }
       });
     }
 
@@ -1012,6 +1071,15 @@
         return (a.pax||0) - (b.pax||0);
       });
       const container = document.getElementById('modalBody');
+      // Dietary controls
+      let sharedDiet = '';
+      const types = Array.from(new Set(items.map(o => (o.dietaryType || '').trim()))).filter(Boolean);
+      if (types.length === 1) sharedDiet = types[0];
+      const dietControls = `
+        <div style=\"margin-bottom:10px; display:flex; gap:10px; align-items:center;\">
+          <label style=\"display:flex; align-items:center; gap:6px;\"><input id=\"dietaryEnabled\" type=\"checkbox\" ${sharedDiet ? 'checked' : ''}> Dietaries</label>
+          <input id=\"dietaryType\" type=\"text\" placeholder=\"e.g., GF, Veg, Halal\" value=\"${sharedDiet}\" style=\"min-width:160px;\">
+        </div>`;
       // Build simple editor list
       const lines = items.map((o) => {
         const defaultTime = arrived ? (o.scheduledTime || '') : (o.baselineScheduledTime || o.scheduledTime || '');
@@ -1023,7 +1091,7 @@
         </div>
         `;
       }).join('');
-      container.innerHTML = lines;
+      container.innerHTML = dietControls + lines;
       document.getElementById('modalOverlay').style.display = 'flex';
     }
 
@@ -1116,6 +1184,18 @@
         const item = orders.find(o => o._id === id);
         if (item) item.scheduledTime = val || '';
       });
+      // apply dietary controls
+      const dietEnabledEl = container.querySelector('#dietaryEnabled');
+      const dietTypeEl = container.querySelector('#dietaryType');
+      if (dietEnabledEl && dietTypeEl) {
+        const enabled = !!dietEnabledEl.checked;
+        const dtype = String(dietTypeEl.value || '').trim();
+        const items = orders.filter(o => o.box === currentModalBox);
+        items.forEach(item => {
+          if (enabled && dtype) item.dietaryType = dtype; else { delete item.dietaryType; }
+        });
+      }
+
       // mark arrival time after checks
       if (currentModalMode === 'arrival') {
         const rec = attendance[currentModalBox] || { arrived: false, arrivedAt: null };
@@ -1237,6 +1317,8 @@
 
     function buildSummaryRows() {
       const items = orders.slice().sort((a,b)=>{
+        const oa = !!a.onDay, ob = !!b.onDay;
+        if (oa !== ob) return oa ? 1 : -1; // onDay to bottom
         const sa = (a._seq ?? 0);
         const sb = (b._seq ?? 0);
         if (sa !== sb) return sa - sb;
@@ -1288,6 +1370,8 @@
     function openSummary() {
       setModalUI('summary', 'Summary', false, 'Close');
       const items = orders.slice().sort((a,b)=>{
+        const oa = !!a.onDay, ob = !!b.onDay;
+        if (oa !== ob) return oa ? 1 : -1; // onDay to bottom
         const sa = (a._seq ?? 0);
         const sb = (b._seq ?? 0);
         if (sa !== sb) return sa - sb;
@@ -1432,6 +1516,30 @@
           <td>${o.scheduledTime || ''}</td>
         `;
         tbody.appendChild(tr);
+
+        // Extra dietary confirmation row per item if applicable
+        if (order.dietaryType) {
+          const dtr = document.createElement('tr');
+          dtr.className = tr.className + ' dietary-row';
+          const dRecRaw = order.dietaryReceived || '';
+          const dGvnRaw = order.dietaryGiven || '';
+          const dRec = formatTime12(dRecRaw) || '';
+          const dGvn = formatTime12(dGvnRaw) || '';
+          dtr.onclick = (e) => {
+            if (e.target.tagName.toLowerCase() !== 'button') {
+              onDietaryClick(index);
+            }
+          };
+          dtr.innerHTML = `
+            <td>${order.box}</td>
+            <td><span class="muted">Dietary:</span> ${order.dietaryType}</td>
+            <td>—</td>
+            <td><span class="${dRecRaw ? '' : 'muted'}">${dRec || '—'}</span></td>
+            <td><span class="${dGvnRaw ? '' : 'muted'}">${dGvn || '—'}</span></td>
+            <td></td>
+          `;
+          tbody.appendChild(dtr);
+        }
       });
     }
 
