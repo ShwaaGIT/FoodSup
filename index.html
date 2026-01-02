@@ -657,6 +657,11 @@
       if (raw == null) return '';
       let s = String(raw).trim();
       if (!s) return '';
+      // Clean up common OCR/scan artifacts between digits (e.g., "04..00 PM", "4..5pm")
+      // Replace any run of non-alphanumeric chars between two digits with a single colon
+      // Do this twice to handle multiple separators in a row like "04..  ..00"
+      s = s.replace(/(\d)[^\da-zA-Z]+(\d)/g, '$1:$2');
+      s = s.replace(/(\d)[^\da-zA-Z]+(\d)/g, '$1:$2');
       // AM/PM variants, e.g., 8, 8:5, 8:05am
       let m = s.match(/^([0-1]?\d|2[0-3])(?::?(\d{1,2}))?\s*(am|pm)$/i);
       if (m) {
@@ -860,6 +865,51 @@
       return normalizeTimeString(String(val));
     }
 
+    // Header detection: find a row with labels for Box/Food/Pax/Time in any order/position
+    function normalizeHeaderText(s) {
+      return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+    }
+    function findHeaderRowAndMap(rows) {
+      const aliases = {
+        box: new Set(['box', 'box #', 'box no', 'box no.', 'box number', 'box#', 'boxno']),
+        food: new Set(['food', 'item', 'menu']),
+        pax: new Set(['pax', 'qty', 'quantity', 'count', 'people', 'heads', 'headcount', 'guests']),
+        scheduledTime: new Set(['time', 'scheduled time', 'scheduled', 'serve at', 'serve time', 'delivery time', 'slot time'])
+      };
+      const matches = (set, cell) => {
+        const t = normalizeHeaderText(cell);
+        if (!t) return false;
+        if (set.has(t)) return true;
+        const tNoSpace = t.replace(/\s+/g, '');
+        for (const a of set) {
+          const aN = a.replace(/[^a-z0-9]+/g, '');
+          if (tNoSpace === aN) return true;
+        }
+        return false;
+      };
+      let best = null;
+      const limit = Math.min(rows.length, 50);
+      for (let ri = 0; ri < limit; ri++) {
+        const row = rows[ri] || [];
+        const idx = { box: -1, food: -1, pax: -1, scheduledTime: -1 };
+        for (let ci = 0; ci < row.length; ci++) {
+          const cell = row[ci];
+          if (idx.box === -1 && matches(aliases.box, cell)) { idx.box = ci; continue; }
+          if (idx.food === -1 && matches(aliases.food, cell)) { idx.food = ci; continue; }
+          if (idx.pax === -1 && matches(aliases.pax, cell)) { idx.pax = ci; continue; }
+          if (idx.scheduledTime === -1 && matches(aliases.scheduledTime, cell)) { idx.scheduledTime = ci; continue; }
+        }
+        const found = ['box','food','pax','scheduledTime'].reduce((n,k)=>n+(idx[k]!==-1?1:0),0);
+        if (found >= 2 && idx.box !== -1 && idx.food !== -1) {
+          if (!best || (idx.pax !== -1 && idx.scheduledTime !== -1)) {
+            best = { rowIndex: ri, idx };
+            if (idx.pax !== -1 && idx.scheduledTime !== -1) break;
+          }
+        }
+      }
+      return best;
+    }
+
     async function tryLoadXlsx() {
       try {
         if (typeof XLSX === 'undefined') return null;
@@ -873,22 +923,16 @@
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, cellDates: true });
         if (!rows || rows.length === 0) return null;
 
-        const header = rows[0].map(h => String(h).trim().toLowerCase());
-        const findIdx = (cands) => cands.map(n => header.indexOf(n)).find(i => i >= 0);
-        const idx = {
-          box: findIdx(['box', 'box #', 'box no', 'box number']),
-          food: findIdx(['food', 'item', 'menu']),
-          pax: findIdx(['pax', 'qty', 'quantity', 'count']),
-          scheduledTime: findIdx(['scheduled time', 'time', 'scheduled', 'serve at', 'serve time'])
-        };
-
-        const dataRows = rows.slice(1).filter(r => r && r.some(cell => String(cell).trim() !== ''));
+        const headerInfo = findHeaderRowAndMap(rows);
+        const headerRowIndex = headerInfo ? headerInfo.rowIndex : 0;
+        const idx = headerInfo ? headerInfo.idx : { box: 0, food: 1, pax: 2, scheduledTime: 3 };
+        const dataRows = rows.slice(headerRowIndex + 1).filter(r => r && r.some(cell => String(cell).trim() !== ''));
         const list = [];
         dataRows.forEach((r) => {
-          const boxVal = idx.box != null ? r[idx.box] : r[0];
-          const foodVal = idx.food != null ? r[idx.food] : r[1];
-          const paxVal = idx.pax != null ? r[idx.pax] : r[2];
-          const timeRaw = idx.scheduledTime != null ? r[idx.scheduledTime] : r[3];
+          const boxVal = idx.box !== -1 ? r[idx.box] : r[0];
+          const foodVal = idx.food !== -1 ? r[idx.food] : r[1];
+          const paxVal = idx.pax !== -1 ? r[idx.pax] : r[2];
+          const timeRaw = idx.scheduledTime !== -1 ? r[idx.scheduledTime] : r[3];
 
           const box = Number(String(boxVal || '').replace(/[^0-9]/g, ''));
           const food = String(foodVal || '').trim();
@@ -1277,22 +1321,17 @@
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, cellDates: true });
         if (!rows || rows.length === 0) throw new Error('Empty sheet');
 
-        const header = rows[0].map(h => String(h).trim().toLowerCase());
-        const findIdx = (cands) => cands.map(n => header.indexOf(n)).find(i => i >= 0);
-        const idx = {
-          box: findIdx(['box', 'box #', 'box no', 'box number']),
-          food: findIdx(['food', 'item', 'menu']),
-          pax: findIdx(['pax', 'qty', 'quantity', 'count']),
-          scheduledTime: findIdx(['scheduled time', 'time', 'scheduled', 'serve at', 'serve time'])
-        };
-
-        const dataRows = rows.slice(1).filter(r => r && r.some(cell => String(cell).trim() !== ''));
+        const headerInfo2 = findHeaderRowAndMap(rows);
+        if (!headerInfo2) throw new Error('Could not find header row with labels for Box, Food, Pax, Time');
+        const headerRowIndex2 = headerInfo2.rowIndex;
+        const idx = headerInfo2.idx;
+        const dataRows = rows.slice(headerRowIndex2 + 1).filter(r => r && r.some(cell => String(cell).trim() !== ''));
         const list = [];
         dataRows.forEach((r) => {
-          const boxVal = idx.box != null ? r[idx.box] : r[0];
-          const foodVal = idx.food != null ? r[idx.food] : r[1];
-          const paxVal = idx.pax != null ? r[idx.pax] : r[2];
-          const timeRaw = idx.scheduledTime != null ? r[idx.scheduledTime] : r[3];
+          const boxVal = idx.box !== -1 ? r[idx.box] : r[0];
+          const foodVal = idx.food !== -1 ? r[idx.food] : r[1];
+          const paxVal = idx.pax !== -1 ? r[idx.pax] : r[2];
+          const timeRaw = idx.scheduledTime !== -1 ? r[idx.scheduledTime] : r[3];
 
           const box = Number(String(boxVal || '').replace(/[^0-9]/g, ''));
           const food = String(foodVal || '').trim();
